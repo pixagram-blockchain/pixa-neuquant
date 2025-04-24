@@ -538,7 +538,7 @@ pub fn quantize_rgba_buffer(buffer: &[u8], width: usize, height: usize, color_co
     let min_skin_colors = 0;
     let min_non_skin_colors = 0;
 
-    let adjusted_skin_ratio = (skin_ratio * 1.2).min(1.0); // boost by 20% capped at 100%
+    let adjusted_skin_ratio = (skin_ratio * 1.1).min(1.0); // boost by 20% capped at 100%
     let skin_colors = ((adjusted_skin_ratio * color_count as f64).round() as usize)
         .max(min_skin_colors);
     let non_skin_colors = color_count.saturating_sub(skin_colors).max(min_non_skin_colors);

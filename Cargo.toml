@@ -1,8 +1,8 @@
 [package]
 name = "neuquant_skin"
-version = "0.0.4"
-edition = "2021"
-repository = "github.com:pixagram-blockchain/pixa-neuquant"
+version = "0.1.0"
+edition = "2024"
+homepage = "https://github.com/pixagram-blockchain/pixa-neuquant"
 
 [lib]
 crate-type = ["cdylib"]
