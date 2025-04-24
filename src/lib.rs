@@ -80,12 +80,12 @@ use std::cmp::{max, min};
 
 const CHANNELS: usize = 4;
 
-const RADIUS_DEC: i32 = 10; // Faster decay = less spatial smoothing
+const RADIUS_DEC: i32 = 48; // Faster decay = less spatial smoothing
 
-const ALPHA_BIASSHIFT: i32 = 9; // alpha starts at 1
+const ALPHA_BIASSHIFT: i32 = 10; // alpha starts at 1
 const INIT_ALPHA: i32 = 1 << ALPHA_BIASSHIFT; // biased by 10 bits
 
-const GAMMA: f64 = 512.0;
+const GAMMA: f64 = 1024.0;
 const BETA: f64 = 1.0 / GAMMA;
 const BETAGAMMA: f64 = BETA * GAMMA;
 
@@ -381,7 +381,7 @@ impl NeuQuant {
            let alpha_ = (1.0 * alpha as f64) / INIT_ALPHA as f64;
 
             let is_skin = is_skin_tone(r, g, b);
-            let boost = if is_skin { 1.2 } else { 1.0 }; // amplify learning for skin tones
+            let boost = if is_skin { 1.0 } else { 1.0 }; // amplify learning for skin tones
 
             let adjusted_alpha = alpha_ * boost;
 
@@ -538,9 +538,9 @@ pub fn quantize_rgba_buffer(buffer: &[u8], color_count: usize) -> Vec<u8> {
     let min_skin_colors = 0;
     let min_non_skin_colors = 0;
 
-    let adjusted_skin_ratio = (skin_ratio * 1.2).min(1.0); // boost by 20% capped at 100%
-    let skin_colors = ((adjusted_skin_ratio * color_count as f64).round() as usize).max(min_skin_colors);
-    let non_skin_colors = color_count.saturating_sub(skin_colors).max(min_non_skin_colors);
+    let adjusted_skin_ratio = (skin_ratio * 1.1); // boost by 20% capped at 100%
+    let skin_colors = ((adjusted_skin_ratio * color_count as f64).round() as usize);
+    let non_skin_colors = color_count.saturating_sub(skin_colors);
 
     // Split pixels into skin and non-skin
     let mut skin_pixels = Vec::with_capacity(buffer.len());
