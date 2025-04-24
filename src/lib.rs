@@ -80,12 +80,12 @@ use std::cmp::{max, min};
 
 const CHANNELS: usize = 4;
 
-const RADIUS_DEC: i32 = 30; // factor of 1/30 each cycle
+const RADIUS_DEC: i32 = 10; // Faster decay = less spatial smoothing
 
-const ALPHA_BIASSHIFT: i32 = 10; // alpha starts at 1
+const ALPHA_BIASSHIFT: i32 = 9; // alpha starts at 1
 const INIT_ALPHA: i32 = 1 << ALPHA_BIASSHIFT; // biased by 10 bits
 
-const GAMMA: f64 = 1024.0;
+const GAMMA: f64 = 512.0;
 const BETA: f64 = 1.0 / GAMMA;
 const BETAGAMMA: f64 = BETA * GAMMA;
 
@@ -120,7 +120,7 @@ type Neuron = Quad<f64>;
 type Color = Quad<i32>;
 
 fn is_skin_tone(r: f64, g: f64, b: f64) -> bool {
-    let y  =  0.299 * r + 0.587 * g + 0.114 * b;
+    //let y  =  0.299 * r + 0.587 * g + 0.114 * b;
     let cb = 128.0 - 0.168736 * r - 0.331264 * g + 0.5 * b;
     let cr = 128.0 + 0.5 * r - 0.418688 * g - 0.081312 * b;
 
@@ -381,7 +381,7 @@ impl NeuQuant {
            let alpha_ = (1.0 * alpha as f64) / INIT_ALPHA as f64;
 
             let is_skin = is_skin_tone(r, g, b);
-            let boost = if is_skin { 1.0 } else { 1.0 }; // no longer amplify learning for skin tones
+            let boost = if is_skin { 1.2 } else { 1.0 }; // amplify learning for skin tones
 
             let adjusted_alpha = alpha_ * boost;
 
@@ -529,7 +529,7 @@ impl NeuQuant {
 }
 
 #[wasm_bindgen]
-pub fn quantize_rgba_buffer(buffer: &[u8], width: usize, height: usize, color_count: usize) -> Vec<u8> {
+pub fn quantize_rgba_buffer(buffer: &[u8], color_count: usize) -> Vec<u8> {
     let total_pixels = buffer.len() / 4;
     let skin_pixel_count = buffer.chunks(4).filter(|p| is_skin_tone(p[0] as f64, p[1] as f64, p[2] as f64)).count();
     let skin_ratio = skin_pixel_count as f64 / total_pixels as f64;
@@ -538,11 +538,9 @@ pub fn quantize_rgba_buffer(buffer: &[u8], width: usize, height: usize, color_co
     let min_skin_colors = 0;
     let min_non_skin_colors = 0;
 
-    let adjusted_skin_ratio = (skin_ratio * 1.1).min(1.0); // boost by 20% capped at 100%
-    let skin_colors = ((adjusted_skin_ratio * color_count as f64).round() as usize)
-        .max(min_skin_colors);
+    let adjusted_skin_ratio = (skin_ratio * 1.2).min(1.0); // boost by 20% capped at 100%
+    let skin_colors = ((adjusted_skin_ratio * color_count as f64).round() as usize).max(min_skin_colors);
     let non_skin_colors = color_count.saturating_sub(skin_colors).max(min_non_skin_colors);
-    let non_skin_colors = color_count.saturating_sub(skin_colors);
 
     // Split pixels into skin and non-skin
     let mut skin_pixels = Vec::with_capacity(buffer.len());
@@ -557,8 +555,8 @@ pub fn quantize_rgba_buffer(buffer: &[u8], width: usize, height: usize, color_co
     }
 
     let samplefac = 1;
-    let nq_skin = NeuQuant::new(samplefac, skin_colors.max(4).min(256), &skin_pixels);
-    let nq_other = NeuQuant::new(samplefac, non_skin_colors.max(4).min(256), &non_skin_pixels);
+    let nq_skin = NeuQuant::new(samplefac, skin_colors, &skin_pixels);
+    let nq_other = NeuQuant::new(samplefac, non_skin_colors, &non_skin_pixels);
 
     // Map each original pixel using the appropriate quantizer
     let mut quantized = Vec::with_capacity(buffer.len());
