@@ -381,7 +381,7 @@ impl NeuQuant {
            let alpha_ = (1.0 * alpha as f64) / INIT_ALPHA as f64;
 
             let is_skin = is_skin_tone(r, g, b);
-            let boost = if is_skin { 1.0 } else { 1.0 }; // amplify learning for skin tones
+            let boost = if is_skin { 1.1 } else { 1.0 }; // amplify learning for skin tones
 
             let adjusted_alpha = alpha_ * boost;
 
@@ -534,17 +534,13 @@ pub fn quantize_rgba_buffer(buffer: &[u8], color_count: usize) -> Vec<u8> {
     let skin_pixel_count = buffer.chunks(4).filter(|p| is_skin_tone(p[0] as f64, p[1] as f64, p[2] as f64)).count();
     let skin_ratio = skin_pixel_count as f64 / total_pixels as f64;
 
-    // Minimum guaranteed neuron counts
-    let min_skin_colors = 0;
-    let min_non_skin_colors = 0;
-
     let adjusted_skin_ratio = (skin_ratio * 1.1); // boost by 20% capped at 100%
     let skin_colors = ((adjusted_skin_ratio * color_count as f64).round() as usize);
     let non_skin_colors = color_count.saturating_sub(skin_colors);
 
     // Split pixels into skin and non-skin
-    let mut skin_pixels = Vec::with_capacity(buffer.len());
-    let mut non_skin_pixels = Vec::with_capacity(buffer.len());
+    let mut skin_pixels = Vec::with_capacity(skin_pixel_count);
+    let mut non_skin_pixels = Vec::with_capacity(buffer.len()-skin_pixel_count);
 
     for pix in buffer.chunks(4) {
         if is_skin_tone(pix[0] as f64, pix[1] as f64, pix[2] as f64) {
@@ -554,7 +550,7 @@ pub fn quantize_rgba_buffer(buffer: &[u8], color_count: usize) -> Vec<u8> {
         }
     }
 
-    let samplefac = 1;
+    let samplefac = 4;
     let nq_skin = NeuQuant::new(samplefac, skin_colors, &skin_pixels);
     let nq_other = NeuQuant::new(samplefac, non_skin_colors, &non_skin_pixels);
 
