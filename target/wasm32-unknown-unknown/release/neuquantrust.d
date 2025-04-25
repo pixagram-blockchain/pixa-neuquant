@@ -1,0 +1,1 @@
+/home/asaitama/Documents/neuquantrust/pixa-neuquant/target/wasm32-unknown-unknown/release/neuquantrust.wasm: /home/asaitama/Documents/neuquantrust/pixa-neuquant/src/lib.rs /home/asaitama/Documents/neuquantrust/pixa-neuquant/src/math.rs

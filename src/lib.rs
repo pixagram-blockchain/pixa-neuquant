@@ -72,7 +72,6 @@ that this copyright notice remain intact.
 #![forbid(unsafe_code)]
 
 use wasm_bindgen::prelude::*;
-
 mod math;
 use crate::math::clamp;
 
@@ -80,7 +79,7 @@ use std::cmp::{max, min};
 
 const CHANNELS: usize = 4;
 
-const RADIUS_DEC: i32 = 30;
+const RADIUS_DEC: i32 = 48; // Faster decay = less spatial smoothing
 
 const ALPHA_BIASSHIFT: i32 = 10; // alpha starts at 1
 const INIT_ALPHA: i32 = 1 << ALPHA_BIASSHIFT; // biased by 10 bits
@@ -125,43 +124,6 @@ fn is_skin_tone(r: f64, g: f64, b: f64) -> bool {
     let cr = 128.0 + 0.5 * r - 0.418688 * g - 0.081312 * b;
 
     (80.0..=120.0).contains(&cb) && (133.0..=173.0).contains(&cr)
-}
-
-pub fn rgb_to_lab(r: u8, g: u8, b: u8) -> (f64, f64, f64) {
-    fn pivot_rgb(n: f64) -> f64 {
-        if n > 0.04045 {
-            ((n + 0.055) / 1.055).powf(2.4)
-        } else {
-            n / 12.92
-        }
-    }
-
-    let r = pivot_rgb(r as f64 / 255.0);
-    let g = pivot_rgb(g as f64 / 255.0);
-    let b = pivot_rgb(b as f64 / 255.0);
-
-    let x = (r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047;
-    let y = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 1.00000;
-    let z = (r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883;
-
-    fn pivot_xyz(n: f64) -> f64 {
-        if n > 0.008856 {
-            n.powf(1.0 / 3.0)
-        } else {
-            (7.787 * n) + (16.0 / 116.0)
-        }
-    }
-
-    let l = (116.0 * pivot_xyz(y)) - 16.0;
-    let a = 500.0 * (pivot_xyz(x) - pivot_xyz(y));
-    let b = 200.0 * (pivot_xyz(y) - pivot_xyz(z));
-    (l, a, b)
-}
-
-pub fn delta_e_cie76(lab1: (f64, f64, f64), lab2: (f64, f64, f64)) -> f64 {
-    let (l1, a1, b1) = lab1;
-    let (l2, a2, b2) = lab2;
-    ((l1 - l2).powi(2) + (a1 - a2).powi(2) + (b1 - b2).powi(2)).sqrt()
 }
 
 pub struct NeuQuant {
@@ -417,10 +379,10 @@ impl NeuQuant {
 
            let alpha_ = (1.0 * alpha as f64) / INIT_ALPHA as f64;
 
-            //let is_skin = is_skin_tone(r, g, b);
-            //let boost = if is_skin { 1.0 } else { 1.0 }; // amplify learning for skin tones
+            let is_skin = is_skin_tone(r, g, b);
+            let boost = if is_skin { 1.0 } else { 1.0 }; // amplify learning for skin tones
 
-            let adjusted_alpha = alpha_;// * boost;
+            let adjusted_alpha = alpha_ * boost;
 
             self.salter_single(adjusted_alpha, j, Quad { b, g, r, a });
             if rad > 0 {
@@ -499,53 +461,66 @@ impl NeuQuant {
     }
     /// Search for best matching color
     fn search_netindex(&self, b: u8, g: u8, r: u8, a: u8) -> usize {
-        let mut best_dist = f64::MAX;
+        let mut best_dist = std::i32::MAX;
         let first_guess = self.netindex[g as usize];
         let mut best_pos = first_guess;
         let mut i = best_pos;
 
-        let lab_target = rgb_to_lab(r, g, b);
-        let alpha_target = a as f64;
-
-        let mut cmp = |i| {
-            let Quad {
-                r: pr,
-                g: pg,
-                b: pb,
-                a: pa,
-            } = self.colormap[i];
-
-            let lab_cmp = rgb_to_lab(pr as u8, pg as u8, pb as u8);
-            let delta_e = delta_e_cie76(lab_target, lab_cmp);
-
-            // You can tweak the `alpha_weight` (default: 0.1–0.25 is gentle)
-            let alpha_weight = 0.1;
-            let alpha_diff = (alpha_target - pa as f64).abs() * alpha_weight;
-
-            let total_dist = delta_e + alpha_diff;
-
-            if total_dist < best_dist {
-                best_pos = i;
-                best_dist = total_dist;
-            }
-
-            // No break early logic – deltaE isn't nicely ordered by green like Euclidean
-            ControlFlow::Continue
-        };
-
-        // Forward search
-        while i < self.netsize {
-            i = if cmp(i).is_break() { break } else { i + 1 };
+        #[inline]
+        fn sqr_dist(a: i32, b: u8) -> i32 {
+            let dist = a - b as i32;
+            dist * dist
         }
 
-        // Backward search
-        let mut j = first_guess.wrapping_sub(1);
-        while j < self.netsize {
-            j = if cmp(j).is_break() {
-                break;
-            } else {
-                j.wrapping_sub(1)
+        {
+            let mut cmp = |i| {
+                let Quad {
+                    r: pr,
+                    g: pg,
+                    b: pb,
+                    a: pa,
+                } = self.colormap[i];
+                let mut dist = sqr_dist(pg, g);
+                if dist > best_dist {
+                    // If the green is less than optimal, break.
+                    // Seems to be arbitrary choice from the original implementation,
+                    // but can't change this w/o invasive changes since
+                    // we also sort by green.
+                    return ControlFlow::Break;
+                }
+                // otherwise, continue searching through the colormap.
+                dist += sqr_dist(pr, r);
+                if dist >= best_dist {
+                    return ControlFlow::Continue;
+                }
+                dist += sqr_dist(pb, b);
+                if dist >= best_dist {
+                    return ControlFlow::Continue;
+                }
+                dist += sqr_dist(pa, a);
+                if dist >= best_dist {
+                    return ControlFlow::Continue;
+                }
+                best_dist = dist;
+                best_pos = i;
+                ControlFlow::Continue
             };
+            while i < self.netsize {
+                i = if cmp(i).is_break() { break } else { i + 1 };
+            }
+            // this j < C is a cheat to avoid the bounds check, as when the loop reaches 0
+            // it will wrap to usize::MAX. Assume that self.netsize < usize::MAX, otherwise
+            // using a lot of memory. This also must be true since netsize < isize::MAX <
+            // usize::MAX, otherwise it would fail while allocating a Vec since they can be at
+            // most isize::MAX elements.
+            let mut j = first_guess.wrapping_sub(1);
+            while j < self.netsize {
+                j = if cmp(j).is_break() {
+                    break;
+                } else {
+                    j.wrapping_sub(1)
+                };
+            }
         }
 
         best_pos
@@ -553,35 +528,21 @@ impl NeuQuant {
 }
 
 #[wasm_bindgen]
-pub fn quantize_rgba_buffer(buffer: &[u8], color_count: usize) -> Vec<u8> {
-    // Optional: Boost skin tones slightly before quantization
-    let mut adjusted_pixels = Vec::with_capacity(buffer.len());
-
-    for pix in buffer.chunks(4) {
-        let (r, g, b, a) = (pix[0], pix[1], pix[2], pix[3]);
-        let boosted = if is_skin_tone(r as f64, g as f64, b as f64) {
-            // Slight bias: increase luminance or saturation, or nudge toward warm tones
-            [
-                (r as f32 * 1.05).min(255.0) as u8,
-                (g as f32 * 1.02).min(255.0) as u8,
-                (b as f32 * 0.98).min(255.0) as u8,
-                a
-            ]
-        } else {
-            [r, g, b, a]
-        };
-        adjusted_pixels.extend_from_slice(&boosted);
-    }
-
-    // Single quantizer pass on the full adjusted buffer
+pub fn quantize(buffer: &[u8], _width: usize, _height: usize, color_count: usize) -> Vec<u8> {
+    // Parameters for NeuQuant
     let samplefac = 1;
-    let nq = NeuQuant::new(samplefac, color_count, &adjusted_pixels);
+    let clamped_color_count = color_count.max(4).min(256);
 
+    // Create a single NeuQuant quantizer for all pixels
+    let nq = NeuQuant::new(samplefac, clamped_color_count, buffer);
+
+    // Map all pixels using the single quantizer
     let mut quantized = Vec::with_capacity(buffer.len());
     for pix in buffer.chunks(4) {
         let idx = nq.index_of(pix);
-        let mapped = nq.lookup(idx).unwrap();
-        quantized.extend_from_slice(&mapped);
+        if let Some(mapped) = nq.lookup(idx) {
+            quantized.extend_from_slice(&mapped);
+        }
     }
 
     quantized

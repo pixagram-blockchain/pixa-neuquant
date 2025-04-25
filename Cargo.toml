@@ -1,6 +1,6 @@
 [package]
-name = "neuquant_skin"
-version = "0.2.0"
+name = "neuquantrust"
+version = "0.0.1"
 edition = "2024"
 homepage = "https://github.com/pixagram-blockchain/pixa-neuquant"
 
